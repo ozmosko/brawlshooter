@@ -13,6 +13,8 @@ export class AudioManager {
     if (this._ctx) {
       // iOS can suspend the context again; resume on every interaction
       if (this._ctx.state === 'suspended') this._ctx.resume();
+      // HTMLAudioElement may have been blocked on first attempt — retry each touch
+      if (this._music && this._music.paused) this._music.play().catch(() => {});
       return;
     }
     try {
