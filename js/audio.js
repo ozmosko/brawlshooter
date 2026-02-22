@@ -35,7 +35,13 @@ export class AudioManager {
     this._musicStarted = true;
     fetch('Avalon_Audio_-_Bulldog_Strut_Main.mp3')
       .then(r => r.arrayBuffer())
-      .then(buf => this._ctx && this._ctx.decodeAudioData(buf))
+      .then(buf => {
+        if (!this._ctx) return;
+        // Use callback form — universally supported (Promise form missing on old iOS Safari)
+        return new Promise((resolve, reject) => {
+          this._ctx.decodeAudioData(buf, resolve, reject);
+        });
+      })
       .then(decoded => {
         if (!decoded || !this._ctx) return;
         const src = this._ctx.createBufferSource();
@@ -47,7 +53,7 @@ export class AudioManager {
         gain.connect(this._masterGain);
         src.start(0);
       })
-      .catch(() => {});
+      .catch(err => console.warn('Music load failed:', err));
   }
 
   // ─── Internal helpers ──────────────────────────────────────────────────────
