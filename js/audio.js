@@ -5,7 +5,7 @@ export class AudioManager {
     this._ctx = null;
     this._enabled = true;
     this._masterGain = null;
-    this._music = null;
+    this._musicStarted = false;
   }
 
   // Must be called after a user gesture (click/tap)
@@ -13,8 +13,6 @@ export class AudioManager {
     if (this._ctx) {
       // iOS can suspend the context again; resume on every interaction
       if (this._ctx.state === 'suspended') this._ctx.resume();
-      // HTMLAudioElement may have been blocked on first attempt — retry each touch
-      if (this._music && this._music.paused) this._music.play().catch(() => {});
       return;
     }
     try {
@@ -30,14 +28,26 @@ export class AudioManager {
     this._startMusic();
   }
 
+  // Load music through Web Audio API so it respects the already-unlocked AudioContext
+  // (HTMLAudioElement has its own separate autoplay policy that blocks on mobile)
   _startMusic() {
-    if (this._music) return;
-    try {
-      this._music = new Audio('Avalon_Audio_-_Bulldog_Strut_Main.mp3');
-      this._music.loop   = true;
-      this._music.volume = 0.30;
-      this._music.play().catch(() => {});
-    } catch (_) {}
+    if (this._musicStarted) return;
+    this._musicStarted = true;
+    fetch('Avalon_Audio_-_Bulldog_Strut_Main.mp3')
+      .then(r => r.arrayBuffer())
+      .then(buf => this._ctx && this._ctx.decodeAudioData(buf))
+      .then(decoded => {
+        if (!decoded || !this._ctx) return;
+        const src = this._ctx.createBufferSource();
+        src.buffer = decoded;
+        src.loop = true;
+        const gain = this._ctx.createGain();
+        gain.gain.value = 0.30;
+        src.connect(gain);
+        gain.connect(this._masterGain);
+        src.start(0);
+      })
+      .catch(() => {});
   }
 
   // ─── Internal helpers ──────────────────────────────────────────────────────
