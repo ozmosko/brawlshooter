@@ -1,7 +1,12 @@
 import {
   CANVAS_W, CANVAS_H, TILE, CHAR_KEYS, CHAR_DEFS, DIFFICULTY, SCREEN,
-  PICKUP_COUNT,
+  PICKUP_COUNT, initCanvasSize,
 } from './config.js';
+
+// Switch to portrait canvas before anything else is set up
+if (('ontouchstart' in window) || navigator.maxTouchPoints > 0) {
+  initCanvasSize(500, 800);
+}
 import { GameMap }       from './map.js';
 import { Camera }        from './camera.js';
 import { Input }         from './input.js';
@@ -18,6 +23,7 @@ import {
   drawHUD, drawRadar, drawMenuScreen, drawCharSelectScreen,
   drawBotCountScreen, drawDiffSelectScreen, drawGameOverScreen, drawKillFeed,
   menuHitTest, charSelectHitTest, botCountHitTest, diffSelectHitTest, gameOverHitTest, quitHitTest,
+  drawMobileControls,
 } from './ui.js';
 
 // ─── Canvas setup ─────────────────────────────────────────────────────────────
@@ -30,6 +36,12 @@ canvas.height = CANVAS_H;
 const audio  = new AudioManager();
 const camera = new Camera();
 const input  = new Input(canvas);
+
+// ─── Menu background images ───────────────────────────────────────────────────
+const menuBg = new Image();
+menuBg.src = 'Untitled (820 x 360 px) (2600 x 1463 px).png';   // desktop (wide)
+const menuBgMobile = new Image();
+menuBgMobile.src = 'Untitled design (1).png'; // mobile (portrait)
 
 // ─── Game State ───────────────────────────────────────────────────────────────
 let screen         = SCREEN.MENU;
@@ -131,8 +143,10 @@ function startGame() {
 // ─── Mouse move for hover ─────────────────────────────────────────────────────
 canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
 
   if (screen === SCREEN.MENU) {
     hoverTarget = menuHitTest(mx, my);
@@ -151,25 +165,8 @@ canvas.addEventListener('mousemove', e => {
   }
 });
 
-// ─── Mouse down — fire/UI clicks ──────────────────────────────────────────────
-let _mouseHeld = false;
-canvas.addEventListener('mousedown', e => {
-  if (e.button !== 0) return;
-  audio.init();  // Unlock audio on first interaction (also starts music)
-
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  // Quit to menu from game screen — check BEFORE setting _mouseHeld
-  if (screen === SCREEN.GAME && quitHitTest(mx, my)) {
-    screen = SCREEN.MENU;
-    _mouseHeld = false;
-    return;
-  }
-
-  _mouseHeld = true;
-
+// ─── Shared UI click handler (mouse + touch) ──────────────────────────────────
+function _handleUIClick(mx, my) {
   if (screen === SCREEN.MENU) {
     if (menuHitTest(mx, my) === 'play') {
       screen = SCREEN.CHAR_SEL;
@@ -211,8 +208,34 @@ canvas.addEventListener('mousedown', e => {
       screen = SCREEN.MENU;
     }
   }
+}
+
+// ─── Mouse down — desktop clicks ──────────────────────────────────────────────
+let _mouseHeld = false;
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  audio.init();  // Unlock audio on first interaction (also starts music)
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
+
+  // Quit to menu from game screen — check BEFORE setting _mouseHeld
+  if (screen === SCREEN.GAME && quitHitTest(mx, my)) {
+    screen = SCREEN.MENU;
+    _mouseHeld = false;
+    return;
+  }
+
+  _mouseHeld = true;
+  _handleUIClick(mx, my);
 });
 canvas.addEventListener('mouseup', e => { if (e.button === 0) _mouseHeld = false; });
+
+// Unlock audio on first touch (touchstart prevents the synthetic mousedown from firing)
+canvas.addEventListener('touchstart', () => audio.init(), { once: true });
 
 // ─── Main Loop ────────────────────────────────────────────────────────────────
 let lastTime = performance.now();
@@ -223,11 +246,18 @@ function loop(now) {
 
   ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
+  // ── Process touch-based UI taps (touchstart fires e.preventDefault so no mousedown) ──
+  if (screen !== SCREEN.GAME) {
+    for (const click of input.flushClicks()) {
+      _handleUIClick(click.x, click.y);
+    }
+  }
+
   if (screen === SCREEN.GAME) {
     updateGame(dt);
     renderGame();
   } else if (screen === SCREEN.MENU) {
-    drawMenuScreen(ctx, hoverTarget === 'play');
+    drawMenuScreen(ctx, hoverTarget === 'play', menuBg, menuBgMobile, input.isMobile);
   } else if (screen === SCREEN.CHAR_SEL) {
     drawCharSelectScreen(ctx, hoverTarget, selectedChar);
   } else if (screen === SCREEN.BOT_COUNT) {
@@ -248,6 +278,11 @@ function loop(now) {
 
 // ─── Game Update ──────────────────────────────────────────────────────────────
 function updateGame(dt) {
+  // ── Touch quit button check ───────────────────────────────────────────────
+  for (const click of input.flushClicks()) {
+    if (quitHitTest(click.x, click.y)) { screen = SCREEN.MENU; return; }
+  }
+
   // ── Bullet time global timer ─────────────────────────────────────────────
   if (bulletTimeActive) {
     bulletTimeTimer -= dt;
@@ -328,12 +363,16 @@ function _handlePlayerInput(dt) {
   player.x = resolved.x;
   player.y = resolved.y;
 
-  // Aim toward mouse
+  // Aim toward mouse (desktop) or right joystick (mobile)
   const mouseWorld = input.mouse;
   player.angle = Math.atan2(mouseWorld.worldY - player.y, mouseWorld.worldX - player.x);
+  if (input.isMobile && input.rightAngle !== null) {
+    player.angle = input.rightAngle;
+  }
 
-  // Shoot (hold LMB)
-  if (_mouseHeld && player.canFire()) {
+  // Shoot (hold LMB on desktop; hold right joystick on mobile)
+  const shouldShoot = input.isMobile ? input.touchShooting : _mouseHeld;
+  if (shouldShoot && player.canFire()) {
     const projs = player.fire(player.angle);
     projectiles.push(...projs);
     audio.playShoot(player.type);
@@ -376,8 +415,9 @@ function renderGame() {
   // HUD
   const aliveBots = bots.filter(b => b.char.alive).length;
   drawHUD(ctx, player, aliveBots, selectedBotCount, DIFFICULTY[selectedDiff], bulletTimeActive, game);
-  drawRadar(ctx, player, allChars);
+  drawRadar(ctx, player, allChars, input.isMobile);
   drawKillFeed(ctx, killFeedEvents);
+  if (input.isMobile) drawMobileControls(ctx, input.touchState, player.superMeter >= 1);
 }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 // ─── Canvas & Viewport ───────────────────────────────────────────────────────
-export const CANVAS_W = 900;
-export const CANVAS_H = 600;
+export let CANVAS_W = 900;
+export let CANVAS_H = 600;
+// Called once at startup (before canvas is created) to switch to portrait on mobile
+export function initCanvasSize(w, h) { CANVAS_W = w; CANVAS_H = h; }
 
 // ─── Map ─────────────────────────────────────────────────────────────────────
 export const TILE  = 64;        // px per cell

@@ -1,4 +1,5 @@
 import { CANVAS_W, CANVAS_H, CHAR_DEFS, CHAR_KEYS, DIFFICULTY, COLOR, SCREEN, MAP_W, MAP_H } from './config.js';
+import { getLBase, getRBase, getSBase, J_RADIUS, S_RADIUS } from './input.js';
 
 // ─── HUD (in-game overlay) ────────────────────────────────────────────────────
 export function drawHUD(ctx, player, aliveBots, totalBots, difficulty, bulletTimeActive, game) {
@@ -111,190 +112,114 @@ export function drawHUD(ctx, player, aliveBots, totalBots, difficulty, bulletTim
 }
 
 // ─── Main Menu ────────────────────────────────────────────────────────────────
-export function drawMenuScreen(ctx, hoverPlay) {
-  // ── Tropical / Brawl Stars-style sky background ───────────────────────────
-  const skyGrad = ctx.createLinearGradient(0, 0, 0, CANVAS_H);
-  skyGrad.addColorStop(0,   '#1a6fc4');   // deep sky blue
-  skyGrad.addColorStop(0.4, '#4fa8e8');   // mid blue
-  skyGrad.addColorStop(0.72, '#f9c74f');  // golden horizon
-  skyGrad.addColorStop(0.85, '#f3722c');  // orange sunset
-  skyGrad.addColorStop(1,    '#c2185b');  // deep pink base
-  ctx.fillStyle = skyGrad;
+export function drawMenuScreen(ctx, hoverPlay, bgImage, bgImageMobile, isMobile) {
+  // ── Background image ───────────────────────────────────────────────────────
+  // Desktop: wide image (2600×1463) — center-crop to 3:2
+  // Mobile:  square image (1024×1024) — top-crop to 3:2 (preserves title)
+  const img = (isMobile && bgImageMobile?.complete && bgImageMobile.naturalWidth > 0)
+    ? bgImageMobile
+    : bgImage;
+
+  if (img && img.complete && img.naturalWidth > 0) {
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const canvasRatio = CANVAS_W / CANVAS_H;
+    let sx, sy, sw, sh;
+    if (iw / ih > canvasRatio) {
+      // Wider than canvas (desktop): center-crop horizontally
+      sh = ih; sw = Math.round(ih * canvasRatio);
+      sy = 0;  sx = Math.round((iw - sw) / 2);
+    } else {
+      // Square or taller (mobile): top-crop to preserve title at top
+      sw = iw; sh = Math.round(iw / canvasRatio);
+      sx = 0;  sy = 0;
+    }
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, CANVAS_W, CANVAS_H);
+  } else {
+    // Fallback if image not yet loaded
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  }
+
+  // ── Dark overlay — heavier at bottom for text readability ─────────────────
+  const ov = ctx.createLinearGradient(0, 0, 0, CANVAS_H);
+  ov.addColorStop(0,   'rgba(0,0,0,0.05)');
+  ov.addColorStop(0.55,'rgba(0,0,0,0.25)');
+  ov.addColorStop(1,   'rgba(0,0,0,0.72)');
+  ctx.fillStyle = ov;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-  // ── Ground band ────────────────────────────────────────────────────────────
-  const groundGrad = ctx.createLinearGradient(0, CANVAS_H * 0.72, 0, CANVAS_H);
-  groundGrad.addColorStop(0, '#c8a96e');   // sand top
-  groundGrad.addColorStop(1, '#a07040');   // sand bottom
-  ctx.fillStyle = groundGrad;
-  ctx.fillRect(0, CANVAS_H * 0.72, CANVAS_W, CANVAS_H * 0.28);
+  // ── Bottom UI panel ────────────────────────────────────────────────────────
+  const btnW = 200, btnH = 54;
+  const btnX = CANVAS_W / 2 - btnW / 2;
+  const btnY = CANVAS_H - 90;          // PLAY slightly above bottom edge
 
-  // ── Sand texture / dunes ──────────────────────────────────────────────────
-  ctx.fillStyle = 'rgba(180,140,80,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(200, CANVAS_H * 0.74, 200, 30, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(700, CANVAS_H * 0.73, 260, 28, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(200,165,100,0.25)';
-  ctx.beginPath();
-  ctx.ellipse(480, CANVAS_H * 0.75, 180, 22, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // ── Clouds ────────────────────────────────────────────────────────────────
-  const drawCloud = (x, y, s) => {
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    for (const [cx, cy, cr] of [[x,y,s*18],[x-s*16,y+s*5,s*13],[x+s*16,y+s*6,s*13],[x-s*8,y-s*6,s*10],[x+s*8,y-s*4,s*11]]) {
-      ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI*2); ctx.fill();
-    }
-  };
-  drawCloud(140, 80, 1.1);
-  drawCloud(680, 60, 0.85);
-  drawCloud(420, 95, 1.3);
-
-  // ── Palm trees (left and right) ───────────────────────────────────────────
-  const drawPalm = (px, py, flip) => {
-    ctx.save();
-    ctx.translate(px, py);
-    if (flip) ctx.scale(-1, 1);
-
-    // Trunk (curved using bezier)
-    ctx.strokeStyle = '#6b4226';
-    ctx.lineWidth = 9;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.bezierCurveTo(8, -40, -5, -80, 10, -120);
-    ctx.stroke();
-    ctx.lineWidth = 1;
-
-    // Fronds (6 palm leaves)
-    const fronds = [
-      { a: -0.7, l: 65 }, { a: 0.1, l: 70 }, { a: 0.8, l: 60 },
-      { a: -1.4, l: 55 }, { a: -2.0, l: 50 }, { a: 1.6, l: 58 },
-    ];
-    for (const { a, l } of fronds) {
-      ctx.fillStyle = '#27a627';
-      ctx.save();
-      ctx.translate(10, -120);
-      ctx.rotate(a);
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(l * 0.3, -12, l * 0.7, -8, l, 5);
-      ctx.bezierCurveTo(l * 0.7, 10, l * 0.3, 8, 0, 0);
-      ctx.fill();
-      // Midrib
-      ctx.strokeStyle = '#1e7a1e';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(l * 0.85, 3);
-      ctx.stroke();
-      ctx.restore();
-    }
-    // Coconuts
-    ctx.fillStyle = '#8B4513';
-    for (const [nx, ny] of [[8,-118],[14,-122],[2,-115]]) {
-      ctx.beginPath(); ctx.arc(nx, ny, 6, 0, Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
-  };
-  drawPalm(80, CANVAS_H * 0.72 + 5, false);
-  drawPalm(820, CANVAS_H * 0.72 + 5, true);
-  drawPalm(160, CANVAS_H * 0.72, false);
-
-  // ── Stars (upper sky) ─────────────────────────────────────────────────────
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  const stars = [[60,30],[340,20],[550,45],[780,18],[120,55],[670,38],[290,12]];
-  for (const [sx, sy] of stars) {
-    ctx.beginPath(); ctx.arc(sx, sy, 1.5, 0, Math.PI*2); ctx.fill();
-  }
-
-  // ── Character silhouettes on horizon ──────────────────────────────────────
-  const silhouettes = [
-    { x: 260, c: '#e74c3c',  size: 32 },
-    { x: 380, c: '#2ecc71',  size: 26 },
-    { x: 500, c: '#f39c12',  size: 24 },
-    { x: 620, c: '#9b59b6',  size: 30 },
-  ];
-  for (const { x, c, size } of silhouettes) {
-    const sy = CANVAS_H * 0.715;
-    ctx.fillStyle = c + 'cc';
-    ctx.beginPath();
-    ctx.arc(x, sy, size, 0, Math.PI * 2);
-    ctx.fill();
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.beginPath();
-    ctx.ellipse(x, sy + size, size * 0.9, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // ── Title panel ───────────────────────────────────────────────────────────
-  // Panel backing
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  _roundRect(ctx, CANVAS_W / 2 - 260, CANVAS_H / 2 - 120, 520, 80, 16);
-  ctx.fill();
-  ctx.strokeStyle = '#f39c12';
-  ctx.lineWidth = 3;
-  _roundRect(ctx, CANVAS_W / 2 - 260, CANVAS_H / 2 - 120, 520, 80, 16);
-  ctx.stroke();
-  ctx.lineWidth = 1;
-
-  // Title text
+  // Controls hint — above PLAY button (differs by platform)
   ctx.textAlign = 'center';
-  ctx.font = 'bold 52px monospace';
-  ctx.shadowBlur = 24;
-  ctx.shadowColor = '#f39c12';
+  ctx.font = 'bold 13px monospace';
   ctx.fillStyle = '#ffffff';
-  ctx.fillText('BRAWL', CANVAS_W / 2 - 100, CANVAS_H / 2 - 53);
-  ctx.fillStyle = '#f39c12';
-  ctx.fillText('SHOOTER', CANVAS_W / 2 + 78, CANVAS_H / 2 - 53);
-  ctx.shadowBlur = 0;
+  const hint = isMobile
+    ? 'Left stick: move  ·  Right stick: aim & shoot  ·  SUPER button'
+    : 'WASD · Mouse aim · Click to shoot · Space for Super';
+  ctx.fillText(hint, CANVAS_W / 2, btnY - 36);
 
-  // Subtitle
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.font = '13px monospace';
-  ctx.fillText('4-Player Top-Down Brawler', CANVAS_W / 2, CANVAS_H / 2 - 28);
+  // Subtitle — above controls hint
+  ctx.font = 'bold 16px monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('4-Player Top-Down Brawler', CANVAS_W / 2, btnY - 62);
 
-  // Play button
-  _drawButton(ctx, CANVAS_W / 2 - 90, CANVAS_H / 2 + 5, 180, 52, '▶  PLAY', hoverPlay, '#f39c12');
-
-  // Controls hint
-  ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  ctx.font = '11px monospace';
-  ctx.fillText('WASD to move  •  Mouse to aim  •  Click to shoot  •  Space for Super', CANVAS_W / 2, CANVAS_H / 2 + 80);
+  // PLAY button
+  _drawButton(ctx, btnX, btnY, btnW, btnH, '▶  PLAY', hoverPlay, '#f39c12');
 }
 
 // ─── Character Select Screen ──────────────────────────────────────────────────
 export function drawCharSelectScreen(ctx, hovered, selected) {
   _drawScreenBg(ctx, 'SELECT YOUR BRAWLER');
 
-  const cardW = 160, cardH = 200;
-  const totalW = CHAR_KEYS.length * cardW + (CHAR_KEYS.length - 1) * 20;
-  const startX = (CANVAS_W - totalW) / 2;
-  const cardY   = CANVAS_H / 2 - cardH / 2 - 10;
+  const isPortrait = CANVAS_W < 600;
+
+  // Layout params
+  let cardW, cardH, getCardPos, bottomY;
+  if (isPortrait) {
+    // 2×2 grid for portrait (500×800)
+    cardW = 218; cardH = 185;
+    const gapX = 16, gapY = 16;
+    const startX = (CANVAS_W - 2 * cardW - gapX) / 2;
+    const startY = 82;
+    getCardPos = (i) => ({
+      x: startX + (i % 2) * (cardW + gapX),
+      y: startY + Math.floor(i / 2) * (cardH + gapY),
+    });
+    bottomY = startY + 2 * cardH + gapY;  // bottom of 2nd row
+  } else {
+    // 4-card horizontal row for landscape (900×600)
+    cardW = 160; cardH = 200;
+    const totalW = CHAR_KEYS.length * cardW + (CHAR_KEYS.length - 1) * 20;
+    const startX = (CANVAS_W - totalW) / 2;
+    const startY = CANVAS_H / 2 - cardH / 2 - 10;
+    getCardPos = (i) => ({ x: startX + i * (cardW + 20), y: startY });
+    bottomY = startY + cardH;
+  }
 
   CHAR_KEYS.forEach((key, i) => {
     const def = CHAR_DEFS[key];
-    const cx = startX + i * (cardW + 20);
+    const { x: cx, y: cy } = getCardPos(i);
     const isHovered  = hovered === key;
     const isSelected = selected === key;
 
     // Card background
     ctx.fillStyle = isSelected ? def.color + 'cc' : isHovered ? '#2c2c5e' : '#1e1e3e';
-    _roundRect(ctx, cx, cardY, cardW, cardH, 10);
+    _roundRect(ctx, cx, cy, cardW, cardH, 10);
     ctx.fill();
 
     // Border
     ctx.strokeStyle = isSelected ? def.color : isHovered ? '#6666cc' : '#333';
     ctx.lineWidth = isSelected ? 3 : 1.5;
-    _roundRect(ctx, cx, cardY, cardW, cardH, 10);
+    _roundRect(ctx, cx, cy, cardW, cardH, 10);
     ctx.stroke();
 
     // Character preview (mini sprite drawn at card centre)
     ctx.save();
-    ctx.translate(cx + cardW / 2, cardY + 72);
+    ctx.translate(cx + cardW / 2, cy + (isPortrait ? 58 : 72));
     ctx.scale(1.8, 1.8);
     _drawMiniChar(ctx, key, def.color);
     ctx.restore();
@@ -303,7 +228,7 @@ export function drawCharSelectScreen(ctx, hovered, selected) {
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(def.name.toUpperCase(), cx + cardW / 2, cardY + 118);
+    ctx.fillText(def.name.toUpperCase(), cx + cardW / 2, cy + (isPortrait ? 96 : 118));
 
     // Stats bar group
     const stats = [
@@ -311,9 +236,10 @@ export function drawCharSelectScreen(ctx, hovered, selected) {
       { label: 'SPD', value: def.speed / 230 },
       { label: 'DMG', value: WEAPON_DMG_SCORE[key] },
     ];
+    const statsY0 = isPortrait ? 108 : 130;
     stats.forEach((s, si) => {
-      const sy = cardY + 130 + si * 18;
-      ctx.fillStyle = '#ddd';          // was '#555' — now visible white
+      const sy = cy + statsY0 + si * 18;
+      ctx.fillStyle = '#ddd';
       ctx.font = 'bold 9px monospace';
       ctx.textAlign = 'left';
       ctx.fillText(s.label, cx + 12, sy + 9);
@@ -327,18 +253,18 @@ export function drawCharSelectScreen(ctx, hovered, selected) {
     ctx.fillStyle = '#f1c40f';
     ctx.font = '9px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`⚡ ${def.superName}`, cx + cardW / 2, cardY + 188);
+    ctx.fillText(`⚡ ${def.superName}`, cx + cardW / 2, cy + cardH - 8);
   });
 
   // Instruction
   ctx.fillStyle = '#ffffff';
   ctx.font = '12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(selected ? 'Click CONFIRM to continue' : 'Click a brawler to select', CANVAS_W / 2, cardY + cardH + 26);
+  ctx.fillText(selected ? 'Tap CONFIRM to continue' : 'Tap a brawler to select', CANVAS_W / 2, bottomY + 26);
 
   // Confirm button (only if selection made)
   if (selected) {
-    _drawButton(ctx, CANVAS_W / 2 - 90, cardY + cardH + 42, 180, 40, 'CONFIRM ▶', true, '#2ecc71');
+    _drawButton(ctx, CANVAS_W / 2 - 90, bottomY + 42, 180, 40, 'CONFIRM ▶', true, '#2ecc71');
   }
 }
 
@@ -372,9 +298,9 @@ export function drawBotCountScreen(ctx, selectedCount, confirmHovered) {
   _drawScreenBg(ctx, 'NUMBER OF BOTS');
 
   const STEPS   = 12;
-  const TRACK_L = 170;
-  const TRACK_W = CANVAS_W - TRACK_L * 2;   // 560px
-  const TRACK_Y = 256;
+  const TRACK_L = CANVAS_W < 600 ? 40 : 170;   // narrower margin in portrait
+  const TRACK_W = CANVAS_W - TRACK_L * 2;
+  const TRACK_Y = CANVAS_W < 600 ? 220 : 256;
   const TRACK_H = 12;
   const THUMB_R = 20;
 
@@ -490,11 +416,12 @@ export function drawGameOverScreen(ctx, won, stats, hoverRestart, hoverMenu) {
 }
 
 // ─── Radar (bottom-left) ──────────────────────────────────────────────────────
-export function drawRadar(ctx, player, allChars) {
+export function drawRadar(ctx, player, allChars, isMobile = false) {
   const PAD = 14;
   const R   = 68;  // radar circle radius
   const cx  = PAD + R;
-  const cy  = CANVAS_H - PAD - R;
+  // On mobile, sit above the left joystick with a small gap
+  const cy  = isMobile ? (getLBase().y - J_RADIUS - 12 - R) : (CANVAS_H - PAD - R);
 
   // ── Clip everything to the radar circle ──────────────────────────────────
   ctx.save();
@@ -691,28 +618,46 @@ const WEAPON_DMG_SCORE = {
 
 // ─── Hit-testing helpers (called from main.js for button interactions) ─────────
 export function menuHitTest(mx, my) {
-  const bx = CANVAS_W / 2 - 90, by = CANVAS_H / 2 + 5;
-  if (mx >= bx && mx <= bx + 180 && my >= by && my <= by + 52) return 'play';
+  const btnW = 200, btnH = 54;
+  const bx = CANVAS_W / 2 - btnW / 2;
+  const by = CANVAS_H - 90;   // must match drawMenuScreen btnY
+  if (mx >= bx && mx <= bx + btnW && my >= by && my <= by + btnH) return 'play';
   return null;
 }
 
 export function charSelectHitTest(mx, my, selected) {
-  const cardW = 160, cardH = 200;
-  const totalW = CHAR_KEYS.length * cardW + (CHAR_KEYS.length - 1) * 20;
-  const startX = (CANVAS_W - totalW) / 2;
-  const cardY   = CANVAS_H / 2 - cardH / 2 - 10;
+  const isPortrait = CANVAS_W < 600;
+  let cardW, cardH, getCardPos, bottomY;
+
+  if (isPortrait) {
+    cardW = 218; cardH = 185;
+    const gapX = 16, gapY = 16;
+    const startX = (CANVAS_W - 2 * cardW - gapX) / 2;
+    const startY = 82;
+    getCardPos = (i) => ({
+      x: startX + (i % 2) * (cardW + gapX),
+      y: startY + Math.floor(i / 2) * (cardH + gapY),
+    });
+    bottomY = startY + 2 * cardH + gapY;
+  } else {
+    cardW = 160; cardH = 200;
+    const totalW = CHAR_KEYS.length * cardW + (CHAR_KEYS.length - 1) * 20;
+    const startX = (CANVAS_W - totalW) / 2;
+    const startY = CANVAS_H / 2 - cardH / 2 - 10;
+    getCardPos = (i) => ({ x: startX + i * (cardW + 20), y: startY });
+    bottomY = startY + cardH;
+  }
 
   for (let i = 0; i < CHAR_KEYS.length; i++) {
-    const cx = startX + i * (cardW + 20);
-    if (mx >= cx && mx <= cx + cardW && my >= cardY && my <= cardY + cardH) {
+    const { x: cx, y: cy } = getCardPos(i);
+    if (mx >= cx && mx <= cx + cardW && my >= cy && my <= cy + cardH) {
       return { type: 'card', key: CHAR_KEYS[i] };
     }
   }
 
-  // Confirm button (updated dimensions to match draw)
   if (selected) {
     const bx = CANVAS_W / 2 - 90;
-    const by = CANVAS_H / 2 - cardH / 2 - 10 + cardH + 42;
+    const by = bottomY + 42;
     if (mx >= bx && mx <= bx + 180 && my >= by && my <= by + 40) {
       return { type: 'confirm' };
     }
@@ -738,9 +683,9 @@ export function diffSelectHitTest(mx, my) {
 
 export function botCountHitTest(mx, my) {
   const STEPS   = 12;
-  const TRACK_L = 170;
+  const TRACK_L = CANVAS_W < 600 ? 40 : 170;
   const TRACK_W = CANVAS_W - TRACK_L * 2;
-  const TRACK_Y = 256;
+  const TRACK_Y = CANVAS_W < 600 ? 220 : 256;
 
   // Slider track hit area (generous vertical range)
   if (mx >= TRACK_L - 10 && mx <= TRACK_L + TRACK_W + 10 && my >= 220 && my <= 310) {
@@ -770,4 +715,62 @@ export function gameOverHitTest(mx, my) {
   if (mx >= px + 20 && mx <= px + 180 && my >= btnY && my <= btnY + 38) return 'restart';
   if (mx >= px + panelW - 180 && mx <= px + panelW - 20 && my >= btnY && my <= btnY + 38) return 'menu';
   return null;
+}
+
+// ─── Mobile Touch Controls Overlay ───────────────────────────────────────────
+export function drawMobileControls(ctx, touchState, superReady) {
+  const drawJoystick = (bx, by, touch) => {
+    // Base ring
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(bx, by, J_RADIUS, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath(); ctx.arc(bx, by, J_RADIUS, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // Thumb — clamped within base radius
+    let tx = bx, ty = by;
+    if (touch) {
+      const dx = touch.thumbX - touch.baseX;
+      const dy = touch.thumbY - touch.baseY;
+      const dist = Math.hypot(dx, dy);
+      const clamped = Math.min(dist, J_RADIUS);
+      const angle = Math.atan2(dy, dx);
+      tx = bx + Math.cos(angle) * clamped;
+      ty = by + Math.sin(angle) * clamped;
+    }
+    ctx.save();
+    ctx.globalAlpha = touch ? 0.75 : 0.35;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(tx, ty, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  };
+
+  const lb = getLBase(), rb = getRBase(), sb = getSBase();
+
+  // Left joystick (movement)
+  drawJoystick(lb.x, lb.y, touchState.left);
+
+  // Right joystick (aim + shoot)
+  drawJoystick(rb.x, rb.y, touchState.right);
+
+  // Super button — glows yellow when ready
+  const sbx = sb.x, sby = sb.y, sr = S_RADIUS;
+  const superAlpha = superReady ? 0.85 : 0.35;
+  ctx.save();
+  ctx.globalAlpha = superAlpha;
+  ctx.strokeStyle = superReady ? '#ffe000' : '#aaaaaa';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(sbx, sby, sr, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = superReady ? 'rgba(255,220,0,0.22)' : 'rgba(255,255,255,0.08)';
+  ctx.beginPath(); ctx.arc(sbx, sby, sr, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = superReady ? '#ffe000' : '#cccccc';
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('SUPER', sbx, sby);
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
 }
