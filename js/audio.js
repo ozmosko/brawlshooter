@@ -8,14 +8,20 @@ export class AudioManager {
     this._music = null;
   }
 
-  // Must be called after a user gesture (click/keypress)
+  // Must be called after a user gesture (click/tap)
   init() {
-    if (this._ctx) return;
+    if (this._ctx) {
+      // iOS can suspend the context again; resume on every interaction
+      if (this._ctx.state === 'suspended') this._ctx.resume();
+      return;
+    }
     try {
       this._ctx = new (window.AudioContext || window.webkitAudioContext)();
       this._masterGain = this._ctx.createGain();
       this._masterGain.gain.value = 0.4;
       this._masterGain.connect(this._ctx.destination);
+      // Mobile browsers start AudioContext suspended even inside a gesture handler
+      this._ctx.resume().catch(() => {});
     } catch (e) {
       this._enabled = false;
     }

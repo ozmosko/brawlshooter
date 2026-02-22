@@ -234,8 +234,9 @@ canvas.addEventListener('mousedown', e => {
 });
 canvas.addEventListener('mouseup', e => { if (e.button === 0) _mouseHeld = false; });
 
-// Unlock audio on first touch (touchstart prevents the synthetic mousedown from firing)
-canvas.addEventListener('touchstart', () => audio.init(), { once: true });
+// Unlock/resume audio on every touch — touchstart suppresses the synthetic mousedown,
+// and iOS re-suspends AudioContext between interactions, so resume each time.
+canvas.addEventListener('touchstart', () => audio.init(), { passive: true });
 
 // ─── Main Loop ────────────────────────────────────────────────────────────────
 let lastTime = performance.now();
